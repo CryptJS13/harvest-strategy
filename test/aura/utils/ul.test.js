@@ -41,7 +41,7 @@ class AuraULTest {
     async setupBalance(underlyingWhale){
         let etherGiver = this.accounts[9];
         // Give whale some ether to make sure the following actions are good
-        await web3.eth.sendTransaction({ from: etherGiver, to: underlyingWhale, value: 1e18});
+        await web3.eth.sendTransaction({ from: etherGiver, to: underlyingWhale, value: 10e18});
 
         this.farmerBalance[0] = await this.underlying.balanceOf(underlyingWhale);
         await this.underlying.transfer(this.farmer[0], this.farmerBalance[0], { from: underlyingWhale });
