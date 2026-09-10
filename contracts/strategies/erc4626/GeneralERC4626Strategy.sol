@@ -20,6 +20,8 @@ contract GeneralERC4626Strategy is BaseUpgradeableStrategy, IHardWorkHooks {
 
   /// @notice Emitted when a fee redemption was refused by the vault and left pending.
   event FeeRedeemDeferred(uint256 amount);
+  /// @notice Emitted when the vault refused a deposit and the underlying was left idle.
+  event SupplyDeferred(uint256 amount);
 
   address public constant harvestMSIG = address(0xF49440C1F012d041802b25A73e5B0B9166a75c02);
 
@@ -243,8 +245,20 @@ contract GeneralERC4626Strategy is BaseUpgradeableStrategy, IHardWorkHooks {
   function _investAllUnderlying() internal onlyNotPausedInvesting {
     address _underlying = underlying();
     uint256 underlyingBalance = IERC20(_underlying).balanceOf(address(this));
-    if (underlyingBalance > 1e3) {
-      _supply(underlyingBalance);
+    // Only offer what the yield source says it will accept. These vaults run a total
+    // deposit cap and `deposit` reverts outright once it is reached, which would take
+    // `doHardWork()` down with it and stop the strategy earning on anything at all.
+    // `maxDeposit` is only a quote - see `_supply` - so this is the cheap first line, not
+    // the guarantee.
+    // The quote is shaved by a tenth of a percent because it is optimistic: these vaults
+    // accrue their management fee on the way in, which lifts total assets and shrinks the
+    // remaining cap inside the very same transaction, so depositing exactly the quoted
+    // headroom is rejected. The margin only ever binds when the strategy is actually up
+    // against the cap - in the normal case the balance is far below it and this is a no-op.
+    uint256 headroom = IERC4626(fToken()).maxDeposit(address(this));
+    uint256 toSupply = Math.min(underlyingBalance, headroom.mul(999).div(1000));
+    if (toSupply > 1e3) {
+      _supply(toSupply);
     }
   }
 
@@ -528,7 +542,18 @@ contract GeneralERC4626Strategy is BaseUpgradeableStrategy, IHardWorkHooks {
     address _fToken = fToken();
     IERC20(_underlying).safeApprove(_fToken, 0);
     IERC20(_underlying).safeApprove(_fToken, amount);
-    IERC4626(_fToken).deposit(amount, address(this));
+    // The deposit is allowed to fail. `maxDeposit` is a quote taken before the call, and
+    // these vaults accrue their management fee on the way in - which lifts total assets and
+    // shrinks the remaining cap inside the very same transaction, so a deposit of exactly
+    // the quoted headroom is rejected. A paused or restricted vault refuses in the same
+    // way. None of that should be able to revert `doHardWork()` and every path that calls
+    // it: the underlying simply stays idle, still counted by
+    // `investedUnderlyingBalance()`, and the next hard work tries again.
+    try IERC4626(_fToken).deposit(amount, address(this)) returns (uint256) {
+    } catch {
+      IERC20(_underlying).safeApprove(_fToken, 0);
+      emit SupplyDeferred(amount);
+    }
   }
 
   /**

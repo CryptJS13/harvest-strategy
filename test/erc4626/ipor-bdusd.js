@@ -250,6 +250,36 @@ describe("Mainnet IPOR Lending bdUSD", function () {
     });
   });
 
+  describe("Yield source deposit cap", function () {
+    it("keeps working when the vault holds more than the PlasmaVault will accept", async function () {
+      // Both IPOR Fusion vaults run a total deposit cap, and `deposit` reverts once it is
+      // reached. Supplying blindly would take doHardWork() down with it and stop the
+      // strategy earning on anything at all.
+      await deploy();
+      const headroom = num(await fToken.maxDeposit(strategy.address));
+      const over = headroom + 500000000000; // headroom + 500,000 USDC
+      await fund(farmer1, String(over));
+      await depositVault(farmer1, underlying, vault, String(over));
+      console.log("  headroom", headroom, "| vault holds", num(await vault.underlyingBalanceInVault()));
+
+      await controller.doHardWork(vault.address, { from: governance });
+
+      const supplied = num(await strategy.currentBalance());
+      const idle = num(await strategy.investedUnderlyingBalance()) - supplied;
+      console.log("  supplied", supplied, "| left idle in the strategy", idle);
+      assert.isTrue(supplied > headroom * 0.99, "it must supply nearly all of what the cap allows");
+      assert.isTrue(supplied <= headroom, "it must not exceed the cap");
+      assert.isTrue(idle > 0, "the remainder must stay idle rather than reverting");
+
+      // Nothing is lost: the vault still accounts for every unit, and holders can exit.
+      const tvl = num(await vault.underlyingBalanceWithInvestment());
+      assert.isTrue(tvl >= over * 0.999, "idle underlying must still count toward TVL");
+      const before = num(await underlying.balanceOf(farmer1));
+      await vault.withdraw((await vault.balanceOf(farmer1)).toString(), { from: farmer1 });
+      assert.isTrue(num(await underlying.balanceOf(farmer1)) - before > 0, "holders must still be able to exit");
+    });
+  });
+
   describe("Exit fee attribution", function () {
     it("charges the PlasmaVault's exit fee to the withdrawing user only", async function () {
       await deploy();
