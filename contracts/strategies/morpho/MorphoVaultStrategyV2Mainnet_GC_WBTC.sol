@@ -21,8 +21,9 @@ contract MorphoVaultStrategyV2Mainnet_GC_WBTC is MorphoVaultStrategyV2 {
       _vault,
       morphoVault,
       weth,
-      address(0x15568A3361a2501181daC9309772cae14156CF9E)
+      address(0x0)
     );
     rewardTokens = [morpho];
+    distributionTime[morpho] = 172_800; // 48 hours
   }
 }

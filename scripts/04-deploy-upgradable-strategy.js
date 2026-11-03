@@ -11,21 +11,31 @@ async function main() {
   const {vaultAddr, strategyName} = await prompt.get(['vaultAddr', 'strategyName']);
 
   const StrategyImpl = artifacts.require(strategyName);
-  const impl = await type2Transaction(StrategyImpl.new);
+  const impl = await StrategyImpl.new();
 
-  console.log("Implementation deployed at:", impl.creates);
-
-  await hre.run("verify:verify", {address: impl.creates});
+  console.log("Implementation deployed at:", impl.address);
 
   const StrategyProxy = artifacts.require('StrategyProxy');
-  const proxy = await type2Transaction(StrategyProxy.new, impl.creates);
+  const proxy = await StrategyProxy.new(impl.address);
 
-  console.log("Proxy deployed at:", proxy.creates);
+  console.log("Proxy deployed at:", proxy.address);
 
-  const strategy = await StrategyImpl.at(proxy.creates);
+  const strategy = await StrategyImpl.at(proxy.address);
   await type2Transaction(strategy.initializeStrategy, addresses.Storage, vaultAddr);
 
-  console.log("Deployment complete. New strategy deployed and initialised at", proxy.creates);
+  console.log("Deployment complete. New strategy deployed and initialised at", proxy.address);
+  const result = {}
+  result.vault = vaultAddr
+  result.strategy = proxy.address
+
+  console.log(result)
+
+  try {
+    await hre.run("verify:verify", {address: impl.address}); 
+  } catch (e) {
+    console.log(e)
+  }
+
 }
 
 main()

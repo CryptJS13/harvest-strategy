@@ -86,10 +86,14 @@ contract CompoundStrategy is BaseUpgradeableStrategy {
     _updateStoredSupplied();
   }
 
+  function feeFloor() public view virtual returns (uint256) {
+    return 1e4;
+  }
+
   function _handleFee() internal {
     _accrueFee();
     uint256 fee = pendingFee();
-    if (fee > 1e4) {
+    if (fee > feeFloor()) {
       _withdrawUnderlyingFromPool(fee);
       address _underlying = underlying();
       fee = Math.min(fee, IERC20(_underlying).balanceOf(address(this)));
@@ -202,9 +206,20 @@ contract CompoundStrategy is BaseUpgradeableStrategy {
     _handleFee();
     _claimReward();
     _liquidateReward();
-    _withdrawUnderlyingFromPool(currentSupplied().sub(pendingFee()));
+    uint256 supplied = currentSupplied();
+    uint256 fee = pendingFee();
+    if (supplied > fee) {
+      _withdrawUnderlyingFromPool(supplied.sub(fee));
+    }
     address underlying_ = underlying();
-    IERC20(underlying_).safeTransfer(vault(), IERC20(underlying_).balanceOf(address(this)));
+    // Keep back whatever fee `_handleFee` could not pay out - it is below the dust floor,
+    // or the yield source refused the redemption. Handing it to the vault along with
+    // everything else would leave `pendingFee` with nothing behind it, and
+    // `investedUnderlyingBalance()` would then report less than zero.
+    uint256 balance = IERC20(underlying_).balanceOf(address(this));
+    if (balance > fee) {
+      IERC20(underlying_).safeTransfer(vault(), balance.sub(fee));
+    }
     _updateStoredSupplied();
   }
 
@@ -241,9 +256,11 @@ contract CompoundStrategy is BaseUpgradeableStrategy {
     // both are in the units of "underlying"
     // The second part is needed because there is the emergency exit mechanism
     // which would break the assumption that all the funds are always inside of the reward pool
-    return IERC20(underlying()).balanceOf(address(this))
-    .add(storedSupplied())
-    .sub(pendingFee());
+    uint256 total = IERC20(underlying()).balanceOf(address(this)).add(storedSupplied());
+    uint256 fee = pendingFee();
+    // Clamped rather than subtracted outright: this is read by every vault entrypoint, so
+    // an underflow here would take deposits, withdrawals and the share price down with it.
+    return total > fee ? total.sub(fee) : 0;
   }
 
   /*

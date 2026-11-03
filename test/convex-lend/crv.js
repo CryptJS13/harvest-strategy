@@ -9,7 +9,7 @@ const IERC20 = artifacts.require("@openzeppelin/contracts/token/ERC20/IERC20.sol
 const Strategy = artifacts.require("ConvexLendStrategyMainnet_crvUSD_CRV");
 const IBooster = artifacts.require("IBooster");
 
-//This test was developed at blockNumber 22267000
+//This test was developed at blockNumber 24427000
 
 // Vanilla Mocha test. Increased compatibility with tools that integrate Mocha.
 describe("Mainnet Convex Curve Lend crvUSD CRV", function() {
@@ -19,7 +19,7 @@ describe("Mainnet Convex Curve Lend crvUSD CRV", function() {
   let underlying;
 
   // external setup
-  let underlyingWhale = "0xcE716a53eF19248771c6e21C03833592F36eEa89";
+  let underlyingWhale = "0xE535b101a990f2Cc37893B774c8e5002A4699659";
   let crv = "0xD533a949740bb3306d119CC777fa900bA034cd52";
 
   // parties in the protocol
@@ -77,8 +77,8 @@ describe("Mainnet Convex Curve Lend crvUSD CRV", function() {
     // whale send underlying to farmers
     await setupBalance();
 
-    // const booster = await IBooster.at("0xF403C135812408BFbE8713b5A23a04b3D48AAE31");
-    // await booster.earmarkRewards(await strategy.poolId());
+    const booster = await IBooster.at("0xF403C135812408BFbE8713b5A23a04b3D48AAE31");
+    await booster.earmarkRewards(await strategy.poolId());
   });
 
   describe("Happy path", function() {

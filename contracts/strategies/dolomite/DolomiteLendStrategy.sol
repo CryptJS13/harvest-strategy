@@ -95,10 +95,14 @@ contract DolomiteLendStrategy is BaseUpgradeableStrategy {
     setUint256(_PENDING_FEE_SLOT, pendingFee().add(fee));
   }
 
+  function feeFloor() public view virtual returns (uint256) {
+    return 1e18;
+  }
+
   function _handleFee() internal {
     _accrueFee();
     uint256 fee = pendingFee();
-    if (fee > 1e18) {
+    if (fee > feeFloor()) {
       _redeem(fee);
       address _underlying = underlying();
       fee = Math.min(fee, IERC20(_underlying).balanceOf(address(this)));
@@ -132,8 +136,14 @@ contract DolomiteLendStrategy is BaseUpgradeableStrategy {
     _liquidateRewards();
     address _underlying = underlying();
     _redeemAll();
-    if (IERC20(_underlying).balanceOf(address(this)) > 0) {
-      IERC20(_underlying).safeTransfer(vault(), IERC20(_underlying).balanceOf(address(this)).sub(pendingFee()));
+    // Keep back whatever fee `_handleFee` could not pay out - it is below the dust floor,
+    // or the yield source refused the redemption. Handing it to the vault along with
+    // everything else would leave `pendingFee` with nothing behind it, and
+    // `investedUnderlyingBalance()` would then report less than zero.
+    uint256 balance = IERC20(_underlying).balanceOf(address(this));
+    uint256 fee = pendingFee();
+    if (balance > fee) {
+      IERC20(_underlying).safeTransfer(vault(), balance.sub(fee));
     }
     _updateStoredBalance();
   }
@@ -155,6 +165,7 @@ contract DolomiteLendStrategy is BaseUpgradeableStrategy {
     uint256 balance = IERC20(_underlying).balanceOf(address(this));
     if (amountUnderlying <= balance) {
       IERC20(_underlying).safeTransfer(vault(), amountUnderlying);
+      _updateStoredBalance();
       return;
     }
     uint256 toRedeem = amountUnderlying.sub(balance);
@@ -234,9 +245,11 @@ contract DolomiteLendStrategy is BaseUpgradeableStrategy {
   * Returns the current balance.
   */
   function investedUnderlyingBalance() public view returns (uint256) {
-    return IERC20(underlying()).balanceOf(address(this))
-    .add(storedBalance())
-    .sub(pendingFee());
+    uint256 total = IERC20(underlying()).balanceOf(address(this)).add(storedBalance());
+    uint256 fee = pendingFee();
+    // Clamped rather than subtracted outright: this is read by every vault entrypoint, so
+    // an underflow here would take deposits, withdrawals and the share price down with it.
+    return total > fee ? total.sub(fee) : 0;
   }
 
   function _supply(uint256 amount) internal {
